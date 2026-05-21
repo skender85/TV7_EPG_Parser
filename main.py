@@ -38,19 +38,25 @@ class programm_item:
 
 def add_srf1_news_episode_numbers(programms):
     """
-    Setzt Plex-DVR-kompatible Episodennummern für SRF-1-Nachrichten:
+    Setzt Plex-DVR-kompatible Episodennummern für SRF-1-Nachrichten.
 
-    - Tagesschau Hauptausgabe (täglich 19:30): Season = Jahr, Episode = Tag-im-Jahr
-        → S2026E142 (z.B. für 22. Mai 2026)
-    - «10 vor 10» (Mo-Fr 21:50): gleiches Schema
+    Erkennung erfolgt rein über Sender + Startzeit (Titel wird bewusst ignoriert,
+    da das EPG verschiedene Schreibweisen liefert: "Tagesschau", "SRF news
+    Tagesschau", "Tagesschau Hauptausgabe" etc. — alle bezeichnen dieselbe Sendung).
 
-    Es werden DREI episode-num XMLTV-Systeme gesetzt für maximale Plex-Kompatibilität:
-      • xmltv_ns         → "2025.141.0/1"     (Plex DVR primär, 0-indexiert: S-1.E-1.P-1/T)
-      • onscreen         → "S2026E142"        (für UI-Anzeige in Plex/Dispatcharr)
-      • original-air-date→ "2026-05-22"       (verhindert das "New"-Label-Spam in Plex)
+    - Tagesschau Hauptausgabe: SRF 1, täglich, Startzeit 19:30 (±5 min)
+    - «10 vor 10»: SRF 1, Montag-Freitag, Startzeit 21:50 (±10 min)
 
-    Andere Tagesschau-Ausgaben (Mittag, Flash, 22:00 etc.) und SRF-info-Wiederholungen
-    werden NICHT angefasst. Bestehende episode_num-Felder werden nicht überschrieben.
+    Schema: Season = Jahr, Episode = Tag im Jahr (1-366).
+        → S2026E142 für 22. Mai 2026
+
+    Drei episode-num XMLTV-Systeme werden gesetzt für maximale Plex-Kompatibilität:
+      • xmltv_ns         → "2025.141.0/1"     (Plex DVR primär, 0-indexiert)
+      • onscreen         → "S2026E142"        (für UI-Anzeige)
+      • original-air-date→ "2026-05-22"       (verhindert "New"-Label-Spam)
+
+    Da wir eindeutig identifizieren (Sender + exakte Startzeit), überschreiben wir
+    bewusst auch vorhandene episode_num-Felder von anderen Quellen.
     """
     tagesschau_count = 0
     ten_vor_ten_count = 0
@@ -58,23 +64,17 @@ def add_srf1_news_episode_numbers(programms):
     for programm in programms:
         if gen_channel_id_from_name(programm.get("channel", "")) != SRF1_CHANNEL_ID:
             continue
-        if programm.get("episode_num"):
-            continue  # nicht überschreiben
 
-        title = (programm.get("title") or "").lower().strip()
         start = programm["start"]
         hour, minute = start.hour, start.minute
+        weekday = start.weekday()  # Montag = 0, Sonntag = 6
 
-        # Tagesschau Hauptausgabe: exakter Titel "tagesschau" + 19:30 (±5 min)
-        is_tagesschau_main = (
-            title == "tagesschau"
-            and hour == 19
-            and 25 <= minute <= 35
-        )
+        # Tagesschau Hauptausgabe: täglich um 19:30 (±5 min)
+        is_tagesschau_main = (hour == 19 and 25 <= minute <= 35)
 
-        # «10 vor 10»: Titel enthält "10 vor 10" oder "10vor10" + 21:50 (±10 min)
+        # «10 vor 10»: Mo-Fr um 21:50 (±10 min)
         is_ten_vor_ten = (
-            ("10 vor 10" in title or "10vor10" in title)
+            weekday < 5
             and hour == 21
             and 40 <= minute <= 59
         )
@@ -97,8 +97,8 @@ def add_srf1_news_episode_numbers(programms):
         else:
             ten_vor_ten_count += 1
 
-    print(f"[✓] Tagesschau Hauptausgabe: {tagesschau_count} Episodennummern gesetzt")
-    print(f"[✓] «10 vor 10»: {ten_vor_ten_count} Episodennummern gesetzt")
+    print(f"[✓] Tagesschau Hauptausgabe (täglich 19:30 auf SRF 1): {tagesschau_count} Episodennummern gesetzt")
+    print(f"[✓] «10 vor 10» (Mo-Fr 21:50 auf SRF 1): {ten_vor_ten_count} Episodennummern gesetzt")
     return programms
 
 
