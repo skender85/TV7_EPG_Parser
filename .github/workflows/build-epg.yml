@@ -3,7 +3,7 @@ name: Build EPG
 on:
   schedule:
     - cron: '0 */6 * * *'   # Alle 6 Stunden
-  workflow_dispatch:         # Manueller Trigger per Knopfdruck
+  workflow_dispatch:         # Manueller Trigger
 
 permissions:
   contents: write
@@ -13,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -26,23 +26,45 @@ jobs:
       - name: Run TV7 EPG Parser
         run: python main.py
 
+      - name: Verify XML files were generated
+        run: |
+          echo "=== Dateien im Arbeitsverzeichnis: ==="
+          ls -la
+          echo ""
+          echo "=== Gefundene XML-Dateien: ==="
+          shopt -s nullglob
+          xml_files=(tv7_*.xml)
+          if [ ${#xml_files[@]} -eq 0 ]; then
+            echo "::error::Parser hat keine XML-Dateien erzeugt – vermutlich waren alle EPG-Quellen temporär offline."
+            exit 1
+          fi
+          ls -la "${xml_files[@]}"
+
       - name: Publish XML to epg-data branch
         run: |
-          # XML-Dateien zwischenspeichern
-          mkdir -p /tmp/output
-          cp tv7_*.xml /tmp/output/ 2>/dev/null || true
+          set -euxo pipefail
 
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 1) XML-Dateien sichern
+          mkdir -p /tmp/epg-output
+          cp tv7_*.xml /tmp/epg-output/
+          ls -la /tmp/epg-output/
 
-          # Orphan-Branch erstellen (verwirft alte History)
+          # 2) Git Identity
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 3) Frischer Orphan-Branch (keine alte History)
           git checkout --orphan epg-data
-          git rm -rf . 2>/dev/null || true
 
-          # XML-Dateien einspielen
-          cp /tmp/output/*.xml . 2>/dev/null || true
+          # 4) Working Dir leeren (.git unangetastet lassen)
+          git reset
+          find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 
-          # Commit & Force-Push
-          git add *.xml
+          # 5) Nur die XML-Dateien einspielen
+          cp /tmp/epg-output/*.xml .
+          ls -la
+
+          # 6) Commit & Force-Push
+          git add tv7_*.xml
           git commit -m "Update EPG $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push --force origin epg-data
