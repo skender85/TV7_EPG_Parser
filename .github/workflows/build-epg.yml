@@ -24,20 +24,25 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run TV7 EPG Parser
-        run: python main.py
+        run: |
+          # -u = unbuffered output, damit print() sofort im Log erscheint
+          python -u main.py
+          echo ""
+          echo "=== Inhalt des Workspace nach Parser-Lauf: ==="
+          ls -la
+          echo ""
+          echo "=== Erzeugte XML-Dateien: ==="
+          ls -la tv7_*.xml 2>/dev/null || echo "(KEINE XML-Dateien erzeugt!)"
 
       - name: Verify XML files were generated
         run: |
-          echo "=== Dateien im Arbeitsverzeichnis: ==="
-          ls -la
-          echo ""
-          echo "=== Gefundene XML-Dateien: ==="
           shopt -s nullglob
           xml_files=(tv7_*.xml)
           if [ ${#xml_files[@]} -eq 0 ]; then
-            echo "::error::Parser hat keine XML-Dateien erzeugt – vermutlich waren alle EPG-Quellen temporär offline."
+            echo "::error::Parser hat keine XML-Dateien erzeugt. Init7 und/oder Teleboy sind aus dem GitHub-Runner nicht erreichbar (möglicher IP-Block), oder beide APIs sind aktuell down. Siehe Parser-Output im vorigen Step."
             exit 1
           fi
+          echo "[✓] ${#xml_files[@]} XML-Datei(en) gefunden:"
           ls -la "${xml_files[@]}"
 
       - name: Publish XML to epg-data branch
@@ -53,18 +58,16 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          # 3) Frischer Orphan-Branch (keine alte History)
+          # 3) Frischer Orphan-Branch
           git checkout --orphan epg-data
-
-          # 4) Working Dir leeren (.git unangetastet lassen)
           git reset
           find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
 
-          # 5) Nur die XML-Dateien einspielen
+          # 4) Nur die XML-Dateien einspielen
           cp /tmp/epg-output/*.xml .
           ls -la
 
-          # 6) Commit & Force-Push
+          # 5) Commit & Force-Push
           git add tv7_*.xml
           git commit -m "Update EPG $(date -u +%Y-%m-%dT%H:%M:%SZ)"
           git push --force origin epg-data
