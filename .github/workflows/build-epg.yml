@@ -1,3 +1,5 @@
+# The EPG providers seem to be blocking US-Hyperscaler IPs and therefore the Github Workflow does not work
+
 name: Build EPG
 
 on:
