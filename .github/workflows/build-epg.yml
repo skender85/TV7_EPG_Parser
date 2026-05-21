@@ -1,0 +1,48 @@
+name: Build EPG
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Alle 6 Stunden
+  workflow_dispatch:         # Manueller Trigger per Knopfdruck
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run TV7 EPG Parser
+        run: python main.py
+
+      - name: Publish XML to epg-data branch
+        run: |
+          # XML-Dateien zwischenspeichern
+          mkdir -p /tmp/output
+          cp tv7_*.xml /tmp/output/ 2>/dev/null || true
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Orphan-Branch erstellen (verwirft alte History)
+          git checkout --orphan epg-data
+          git rm -rf . 2>/dev/null || true
+
+          # XML-Dateien einspielen
+          cp /tmp/output/*.xml . 2>/dev/null || true
+
+          # Commit & Force-Push
+          git add *.xml
+          git commit -m "Update EPG $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push --force origin epg-data
