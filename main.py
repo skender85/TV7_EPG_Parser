@@ -9,6 +9,14 @@ from epg_sources.init7 import init7
 import validators
 
 
+# Erste Tagesschau-Sendung auf SRF 1: 3. Februar 1953
+TAGESSCHAU_FIRST_BROADCAST = datetime.date(1953, 2, 3)
+# Erste «10 vor 10»-Sendung auf SRF 1: 20. August 1990
+TEN_VOR_TEN_FIRST_BROADCAST = datetime.date(1990, 8, 20)
+# Channel-ID nach gen_channel_id_from_name("SRF 1") → "srf1"
+SRF1_CHANNEL_ID = "srf1"
+
+
 class channel_item:
     id: str
     lang: str
@@ -30,6 +38,62 @@ class programm_item:
     episode_num: str
     date: int
     length: int
+
+
+def add_srf1_news_episode_numbers(programms):
+    """
+    Fügt sequenzielle Episodennummern zu SRF-1-Nachrichtensendungen hinzu:
+
+    - Tagesschau Hauptausgabe (19:30 Uhr, täglich):
+        Episodennummer = Tage seit der ersten Sendung am 03.02.1953 (Folge 1).
+        Andere Tagesschau-Ausgaben (Mittag, Flash, 22:00 etc.) werden ignoriert.
+
+    - «10 vor 10» (21:50 Uhr, Mo-Fr):
+        Episodennummer = Tage seit der ersten Sendung am 20.08.1990 (Folge 1).
+
+    Mehrere Ausstrahlungen derselben Ausgabe innerhalb des Erkennungs-Zeitfensters
+    erhalten dieselbe Nummer. Bestehende episode_num-Felder werden nicht überschrieben.
+    Andere Kanäle (z.B. SRF info Wiederholungen) werden nicht angefasst.
+    """
+    tagesschau_count = 0
+    ten_vor_ten_count = 0
+
+    for programm in programms:
+        if gen_channel_id_from_name(programm.get("channel", "")) != SRF1_CHANNEL_ID:
+            continue
+        if programm.get("episode_num"):
+            continue  # nicht überschreiben
+
+        title = (programm.get("title") or "").lower().strip()
+        start = programm["start"]
+        hour, minute = start.hour, start.minute
+
+        # Tagesschau Hauptausgabe: exakter Titel "tagesschau" + 19:30 (±5 min)
+        is_tagesschau_main = (
+            title == "tagesschau"
+            and hour == 19
+            and 25 <= minute <= 35
+        )
+
+        # «10 vor 10»: Titel enthält "10 vor 10" oder "10vor10" + 21:50 (±10 min)
+        is_ten_vor_ten = (
+            ("10 vor 10" in title or "10vor10" in title)
+            and hour == 21
+            and 40 <= minute <= 59
+        )
+
+        if is_tagesschau_main:
+            episode = (start.date() - TAGESSCHAU_FIRST_BROADCAST).days + 1
+            programm["episode_num"] = f"E{episode}"
+            tagesschau_count += 1
+        elif is_ten_vor_ten:
+            episode = (start.date() - TEN_VOR_TEN_FIRST_BROADCAST).days + 1
+            programm["episode_num"] = f"E{episode}"
+            ten_vor_ten_count += 1
+
+    print(f"[✓] Tagesschau Hauptausgabe: {tagesschau_count} Episodennummern gesetzt")
+    print(f"[✓] «10 vor 10»: {ten_vor_ten_count} Episodennummern gesetzt")
+    return programms
 
 
 def __main__():
@@ -70,6 +134,7 @@ def __main__():
 
     # generate tv7_teleboy_epg.xml
     if len(teleboy_epg) > 0:
+        teleboy_epg = add_srf1_news_episode_numbers(teleboy_epg)
         with open("tv7_teleboy_epg.xml", "w+") as w:
             w.write(
                 '<?xml version="1.0" encoding="UTF-8" ?><tv>'
@@ -77,6 +142,7 @@ def __main__():
             )
 
     if len(teleboy_epg_past) > 0:
+        teleboy_epg_past = add_srf1_news_episode_numbers(teleboy_epg_past)
         with open("tv7_teleboy_epg_past.xml", "w+") as w:
             w.write(
                 '<?xml version="1.0" encoding="UTF-8" ?><tv>'
@@ -84,6 +150,7 @@ def __main__():
             )
 
     if len(init7_epg) > 0:
+        init7_epg = add_srf1_news_episode_numbers(init7_epg)
         with open("tv7_init7_epg.xml", "w+") as w:
             w.write(
                 '<?xml version="1.0" encoding="UTF-8" ?><tv>'
@@ -96,6 +163,7 @@ def __main__():
     full_epg.extend(teleboy_epg_past)
     full_epg.extend(init7_epg)
     full_epg = deduplicate_programms(full_epg)
+    full_epg = add_srf1_news_episode_numbers(full_epg)
 
     programms_xmltv = programms_to_xmltv(full_epg)
     if len(full_epg) > 0:
