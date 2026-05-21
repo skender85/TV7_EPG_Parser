@@ -9,10 +9,6 @@ from epg_sources.init7 import init7
 import validators
 
 
-# Erste Tagesschau-Sendung auf SRF 1: 3. Februar 1953
-TAGESSCHAU_FIRST_BROADCAST = datetime.date(1953, 2, 3)
-# Erste «10 vor 10»-Sendung auf SRF 1: 20. August 1990
-TEN_VOR_TEN_FIRST_BROADCAST = datetime.date(1990, 8, 20)
 # Channel-ID nach gen_channel_id_from_name("SRF 1") → "srf1"
 SRF1_CHANNEL_ID = "srf1"
 
@@ -42,18 +38,19 @@ class programm_item:
 
 def add_srf1_news_episode_numbers(programms):
     """
-    Fügt sequenzielle Episodennummern zu SRF-1-Nachrichtensendungen hinzu:
+    Setzt Plex-DVR-kompatible Episodennummern für SRF-1-Nachrichten:
 
-    - Tagesschau Hauptausgabe (19:30 Uhr, täglich):
-        Episodennummer = Tage seit der ersten Sendung am 03.02.1953 (Folge 1).
-        Andere Tagesschau-Ausgaben (Mittag, Flash, 22:00 etc.) werden ignoriert.
+    - Tagesschau Hauptausgabe (täglich 19:30): Season = Jahr, Episode = Tag-im-Jahr
+        → S2026E142 (z.B. für 22. Mai 2026)
+    - «10 vor 10» (Mo-Fr 21:50): gleiches Schema
 
-    - «10 vor 10» (21:50 Uhr, Mo-Fr):
-        Episodennummer = Tage seit der ersten Sendung am 20.08.1990 (Folge 1).
+    Es werden DREI episode-num XMLTV-Systeme gesetzt für maximale Plex-Kompatibilität:
+      • xmltv_ns         → "2025.141.0/1"     (Plex DVR primär, 0-indexiert: S-1.E-1.P-1/T)
+      • onscreen         → "S2026E142"        (für UI-Anzeige in Plex/Dispatcharr)
+      • original-air-date→ "2026-05-22"       (verhindert das "New"-Label-Spam in Plex)
 
-    Mehrere Ausstrahlungen derselben Ausgabe innerhalb des Erkennungs-Zeitfensters
-    erhalten dieselbe Nummer. Bestehende episode_num-Felder werden nicht überschrieben.
-    Andere Kanäle (z.B. SRF info Wiederholungen) werden nicht angefasst.
+    Andere Tagesschau-Ausgaben (Mittag, Flash, 22:00 etc.) und SRF-info-Wiederholungen
+    werden NICHT angefasst. Bestehende episode_num-Felder werden nicht überschrieben.
     """
     tagesschau_count = 0
     ten_vor_ten_count = 0
@@ -82,13 +79,22 @@ def add_srf1_news_episode_numbers(programms):
             and 40 <= minute <= 59
         )
 
+        if not (is_tagesschau_main or is_ten_vor_ten):
+            continue
+
+        year = start.year
+        day_of_year = start.timetuple().tm_yday  # 1..366
+
+        # Plex-kompatible Episode-Nummern in mehreren Systemen
+        programm["episode_num"] = f"S{year}E{day_of_year:03d}"
+        programm["episode_num_system"] = "onscreen"
+        # xmltv_ns: 0-indexiert season.episode.part/total
+        programm["episode_num_xmltv_ns"] = f"{year - 1}.{day_of_year - 1}.0/1"
+        programm["episode_num_original_air_date"] = start.strftime("%Y-%m-%d")
+
         if is_tagesschau_main:
-            episode = (start.date() - TAGESSCHAU_FIRST_BROADCAST).days + 1
-            programm["episode_num"] = f"E{episode}"
             tagesschau_count += 1
-        elif is_ten_vor_ten:
-            episode = (start.date() - TEN_VOR_TEN_FIRST_BROADCAST).days + 1
-            programm["episode_num"] = f"E{episode}"
+        else:
             ten_vor_ten_count += 1
 
     print(f"[✓] Tagesschau Hauptausgabe: {tagesschau_count} Episodennummern gesetzt")
@@ -361,6 +367,12 @@ def programms_to_xmltv(programms):
                 programm_xml = f"{programm_xml}<episode-num system=\"{programm['episode_num_system']}\">{programm['episode_num']}</episode-num>"
             else:
                 programm_xml = f"{programm_xml}<episode-num system=\"onscreen\">{programm['episode_num']}</episode-num>"
+
+        # Zusätzliche episode-num Systeme (Plex DVR liest primär xmltv_ns)
+        if "episode_num_xmltv_ns" in programm:
+            programm_xml = f"{programm_xml}<episode-num system=\"xmltv_ns\">{programm['episode_num_xmltv_ns']}</episode-num>"
+        if "episode_num_original_air_date" in programm:
+            programm_xml = f"{programm_xml}<episode-num system=\"original-air-date\">{programm['episode_num_original_air_date']}</episode-num>"
 
         programm_xml = f"{programm_xml}</programme>"
         programms_xml = programms_xml + programm_xml
